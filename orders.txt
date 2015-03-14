@@ -1,0 +1,4 @@
+2015-02-28 10:00:00, Restaurant 1, Risotto, 3
+2015-02-28 12:00:00, Restaurant 2, Pasta, 4
+2015-02-28 13:30:00, Restaurant 1, Pasta, 2
+2015-02-28 15:00:00, Restaurant 1, Burger, 1
