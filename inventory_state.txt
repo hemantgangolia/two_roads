@@ -1,3 +1,0 @@
-2015-02-27,Restaurant 1,Rice,20
-2015-02-27,Restaurant 1,Chicken,2
-2015-02-27,Restaurant 1,Penne,10

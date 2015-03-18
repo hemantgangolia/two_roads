@@ -4,147 +4,33 @@
 #include <sstream>
 #include <map>
 #include <cstdlib>
-#include <algorithm>
+#include <ctime>
 
 #include <dirent.h>
 #include <unistd.h>
 #include <sys/stat.h>
-#include <sys/types.h>
 
-#include <algorithm> 
-#include <functional> 
-#include <cctype>
-#include <locale>
-
+#include "ingredient.h"
+#include "inventory.h"
+#include "restaurant.h"
+#include "dish.h"
+#include "menu.h"
+#include "order.h"
+#include "helper.h"
+#include "resto_system.h"
 
 using namespace std;
 
 #define DEBUG 0
 
-class Ingredient
-{
-public:
-  string name;
-  int expiry;
-  Ingredient () {}
-  Ingredient(string n, int ex) {
-    name = n;
-    expiry = ex;
-  }
-};
-
-class Dish
-{
-public:
-  string name;
-  vector<Ingredient*> ingredients;
-  vector<int> quantity;
-  Dish () {}
-  Dish(string n) {
-    name = n;
-  }
-};
-
-class Menu
-{
-public:
-  vector<Dish*> dishes;
-};
-
-class Inventory
-{
-public:
-  string date, ingredient_name;
-  int quantity, bought_since;
-  Inventory () {}
-  Inventory(string d, string i_name, int qty, int b_s) {
-    date = d;
-    ingredient_name = i_name;
-    quantity = qty;
-    bought_since = b_s;
-  }
-  void addToQuantity(int qty) {
-    quantity += qty;
-  }
-};
-
-class Restaurant {
-public:
-  string name;
-  Menu res_menu;
-  map<string, vector<Inventory*> > ing_inv_map; // map of ingredient_name -> inventory for that ingredients
-  std::map<string, int> ing_net_quantity_map;   // map of ingredient_name -> net quantity available
-  Restaurant () {}
-  Restaurant (string n, Menu menu) {
-    name = n;
-    res_menu = menu;
-  }
-
-  void calculateIngredientNetQuantity () {
-    for (std::map<string, std::vector<Inventory*> >::iterator it=ing_inv_map.begin(); it!=ing_inv_map.end(); ++it) {
-      std::vector<Inventory*> vec_inv = it->second;
-      ing_net_quantity_map[it->first] = 0;
-      for (int i = 0; i < vec_inv.size(); i++) {
-        ing_net_quantity_map[it->first] += vec_inv[i]->quantity;
-      }
-    }
-  }
-
-  void removeIngredientAfterOrder (string i_name, int qty) {
-    ing_net_quantity_map[i_name] -= qty;
-    int index = 0;
-    vector<Inventory*> vec_inv = ing_inv_map[i_name];
-    while (qty > 0) {
-      if (vec_inv[index] == NULL) {
-        index++;
-        continue;
-      }
-
-      qty -= vec_inv[index]->quantity;
-
-      if (qty > 0) {
-        vec_inv[index] = NULL;
-      }
-    }
-  }
-
-};
-
-class Order {
-public:
-  string timestamp, resto_id, dish;
-  int quantity;
-  Order () {}
-  Order(string ts, string rs, string d, int qty) {
-    timestamp = ts;
-    resto_id = rs;
-    dish = d;
-    quantity = qty;
-  }
-};
-
-
-string trim_comma(string str) {
-  return str[str.size()-1] == ',' ? str.substr(0, str.size()-1) : str;
-}
-// trim from start
-static inline std::string &ltrim(std::string &s) {
-        s.erase(s.begin(), std::find_if(s.begin(), s.end(), std::not1(std::ptr_fun<int, int>(std::isspace))));
-        return s;
+void RestoSystem::run() {
+  readIngredients ( ingredient_map );
+  readDishes ( dish_map, ingredient_map );
+  readRestaurantMenus ( dish_map, restos, resto_map );
+  runSys (resto_map, dish_map, ingredient_map);
 }
 
-// trim from end
-static inline std::string &rtrim(std::string &s) {
-        s.erase(std::find_if(s.rbegin(), s.rend(), std::not1(std::ptr_fun<int, int>(std::isspace))).base(), s.end());
-        return s;
-}
-
-// trim from both ends
-static inline std::string trim(std::string s) {
-        return ltrim(rtrim(s));
-}
-
-int readIngredients(map<string, Ingredient*> &ingredient_map) {
+int RestoSystem::readIngredients(map<string, Ingredient*> &ingredient_map) {
   cout << "Reading Ingredients ..." << endl;
   string line;
   ifstream myfile ("ingredients.txt");
@@ -163,7 +49,7 @@ int readIngredients(map<string, Ingredient*> &ingredient_map) {
     myfile.close();
   }
 
-  else cout << "Unable to open file"; 
+  else cout << "Unable to open file" << endl; 
 
   if (DEBUG) {
     for (std::map<string, Ingredient*>::iterator it=ingredient_map.begin(); it!=ingredient_map.end(); ++it)
@@ -172,7 +58,7 @@ int readIngredients(map<string, Ingredient*> &ingredient_map) {
   return 0;
 }
 
-int readDishes(map<string, Dish*> &dish_map, map<string, Ingredient*> &ingredient_map) {
+int RestoSystem::readDishes(map<string, Dish*> &dish_map, map<string, Ingredient*> &ingredient_map) {
   cout << "Reading Dishes ..." << endl;
   string line;
   ifstream myfile ("dishes.txt");
@@ -203,7 +89,7 @@ int readDishes(map<string, Dish*> &dish_map, map<string, Ingredient*> &ingredien
     myfile.close();
   }
 
-  else cout << "Unable to open file"; 
+  else cout << "Unable to open file" << endl; 
 
   if (DEBUG) {
     for (std::map<string, Dish*>::iterator it=dish_map.begin(); it!=dish_map.end(); ++it) {
@@ -216,17 +102,7 @@ int readDishes(map<string, Dish*> &dish_map, map<string, Ingredient*> &ingredien
   return 0;
 }
 
-string GetBaseFilename(string fName)
-{
-    int pos = fName.find_last_of(".");
-    if(pos == string::npos)  //No extension.
-        return fName;
-    if(pos == 0)    //. is at the front. Not an extension.
-        return fName;
-    return fName.substr(0, pos);
-}
-
-int readRestaurantMenus(map<string, Dish*> &dish_map, std::vector<Restaurant*> &restos, std::map<string, Restaurant*> &resto_map) {
+int RestoSystem::readRestaurantMenus(map<string, Dish*> &dish_map, std::vector<Restaurant*> &restos, std::map<string, Restaurant*> &resto_map) {
   cout << "Reading Restaurant Menus ..." << endl; 
   ifstream fin;
   string dir = "menus", filepath;
@@ -289,6 +165,8 @@ int readOrders(std::vector<Order*> &orders) {
 
         pch = strtok ((char*)line.c_str(), ",");
         ts = trim(string(pch));
+        ts = ts.substr(0, ts.find(' '));
+
         pch = strtok (NULL, ",");
         resto_name = trim(string(pch));
         pch = strtok (NULL, ",");
@@ -302,14 +180,20 @@ int readOrders(std::vector<Order*> &orders) {
     myfile.close();
   }
 
-  else cout << "Unable to open file"; 
+  else cout << "Unable to open file" << endl; 
 
   return 0;
 }
 
-int readInventoryState (std::map<string, Ingredient*> ingredient_map, std::map<string, Restaurant*> &resto_map) {
+int readInventoryState (string today, std::map<string, Ingredient*> ingredient_map, std::map<string, Restaurant*> &resto_map) {
 
-  cout << "Reading Inventory State ..." << endl;
+  for (std::map<string, Restaurant*>::iterator resto_it = resto_map.begin(); resto_it!= resto_map.end(); ++resto_it) {
+    resto_it->second->ing_inv_map.clear();
+    resto_it->second->ing_net_quantity_map.clear();
+  }
+
+  cout << "Reading Inventory State for " << today << endl;
+
   string line;
   ifstream myfile ("inventory_state_with_expiry.txt");
   if (myfile.is_open()) {
@@ -321,6 +205,11 @@ int readInventoryState (std::map<string, Ingredient*> ingredient_map, std::map<s
 
       pch = strtok ((char*)line.c_str(), ",");
       date = trim(string(pch));
+
+      if (date.compare(today) != 0) {
+        continue;
+      }
+
       pch = strtok (NULL, ",");
       resto_id = trim(string(pch));
       pch = strtok (NULL, ",");
@@ -329,11 +218,14 @@ int readInventoryState (std::map<string, Ingredient*> ingredient_map, std::map<s
       qty = atoi(trim(string(pch)).c_str());
       pch = strtok (NULL, ",");
       bought_since = atoi(trim(string(pch)).c_str());
+
+      if (qty == 0) {
+        continue;
+      }
       
-      // add a day to bought_since to reach expiry
-      bought_since += 1;
       if (bought_since >= ingredient_map[i_name]->expiry) {
         // dont add the ingredient for today's state if ingredient expired
+        cout << "Item expired! " << i_name << " " << resto_id << " " << qty << endl;
         continue;
       }
       
@@ -344,7 +236,10 @@ int readInventoryState (std::map<string, Ingredient*> ingredient_map, std::map<s
     myfile.close();
   }
 
-  else cout << "Unable to open file"; 
+  else {
+    cout << "Unable to open file" << endl; 
+    return 1;
+  }
 
   // calculates net quantity available for a ingredient
   for (std::map<string, Restaurant*>::iterator resto_it = resto_map.begin(); resto_it!= resto_map.end(); ++resto_it) {
@@ -356,42 +251,58 @@ int readInventoryState (std::map<string, Ingredient*> ingredient_map, std::map<s
 
 
 
-int serveOrders(std::map<string, Dish*> &dish_map, std::vector<Order*> &orders, std::map<string, Restaurant*> &resto_map, int start_index, int end_index) {
+int serveOrders(string date, std::map<string, Dish*> &dish_map, std::vector<Order*> &orders, std::map<string, Restaurant*> &resto_map, int end_index) {
 
-  for (int i = start_index; i < end_index; i++) {
+  for (int i = end_index; i < orders.size(); i++) {
+    if (orders[i]->date.compare(date) != 0) {
+      break;
+    }
+
     Restaurant * resto = resto_map[orders[i]->resto_id];
 
     Dish * dish = dish_map[orders[i]->dish];
 
-    int flag = 1; // we might
-    // check whether we can serve the dish or not
-    for (int j = 0; j < dish->ingredients.size(); j++) {
-      Ingredient * ing = dish->ingredients[j];
-      if (resto->ing_net_quantity_map.find(ing->name) == resto->ing_net_quantity_map.end()) {
-        flag = 0;
+    int flag = 1, k;
+    for (k = 0; k < orders[i]->quantity; k++) {
+
+      flag = 1; // we might
+      // check whether we can serve the dish or not
+      for (int j = 0; j < dish->ingredients.size(); j++) {
+        Ingredient * ing = dish->ingredients[j];
+        if (resto->ing_net_quantity_map.find(ing->name) == resto->ing_net_quantity_map.end()) {
+          // we don't have the ingredient, thus cannot serve the dish
+          flag = 0;
+          break;
+        }
+        
+
+        int ing_qty = dish->quantity[j];
+        if (resto->ing_net_quantity_map[ing->name] - ing_qty < 0) {
+          flag = 0; // we cannot
+          break;
+        } 
+      }
+
+      if (flag == 0) {
+        // we cannot serve the dish, go to the next dish
+        continue;
+      }
+
+      // decrease the inventory
+      for (int j = 0; j < dish->ingredients.size(); j++) {
+        Ingredient * ing = dish->ingredients[j];
+        int ing_qty = dish->quantity[j];
+        resto->removeIngredientAfterOrder(ing->name, ing_qty);
+      }
+
+      if (flag == 0) {
+        // we cannot serve any more dishes 
         break;
       }
-      
-
-      int ing_qty = dish->quantity[j];
-      if (resto->ing_net_quantity_map[ing->name] - ing_qty < 0) {
-        flag = 0; // we cannot
-        break;
-      } 
     }
 
-    if (flag == 0) {
-      // we cannot serve the dish
-      continue;
-    }
-
-    // decrease the inventory
-    for (int j = 0; j < dish->ingredients.size(); j++) {
-      Ingredient * ing = dish->ingredients[j];
-      int ing_qty = dish->quantity[j];
-      resto->removeIngredientAfterOrder(ing->name, ing_qty);
-    }
-
+    cout << "New Order => " << date << " " << resto->name << " " << dish->name << " " << orders[i]->quantity << endl;
+    cout << "----Served Order => " << date << " " << resto->name << " " << dish->name << " " << k << endl;
   }
 
   return 0;
@@ -407,30 +318,30 @@ int reStockInventory (std::map<string, Restaurant*> &resto_map, std::map<string,
     for (int i = 0; i < vec_inv.size(); i++) {
       string ing_name = vec_inv[i]->ingredient_name;
       resto->ing_inv_map[ing_name].push_back(vec_inv[i]);
+      cout << "Inventory Restocked! " << resto_name << " " << ing_name << " " << vec_inv[i]->quantity << " " << vec_inv[i]->date << endl;
     }
     resto->calculateIngredientNetQuantity();
   }
 
 }
 
-
 int getInventorySuggestion (string date, map<string, Ingredient*> &ingredient_map, std::map<string, Restaurant*> &resto_map, std::vector<Order*> &orders, std::map<string, vector<Inventory*> > &resto_inventory_suggestions) {
   // Simple strategy to add 10 of each ingredient and not consider previous orders
   for (std::map<string, Ingredient*>::iterator ingredient_it=ingredient_map.begin(); ingredient_it!=ingredient_map.end(); ++ingredient_it){
     Ingredient *ing = ingredient_it->second;
-    Inventory * inv = new Inventory(date, ing->name, 10, 0);
 
     for (std::map<string, Restaurant*>::iterator resto_it = resto_map.begin(); resto_it!= resto_map.end(); ++resto_it) {
+      Inventory * inv = new Inventory(date, ing->name, 10, 0);
       Restaurant * resto = resto_it->second;
       resto_inventory_suggestions[resto->name].push_back(inv);
     }
   }
 }
 
-void outputInventorySuggestion (string date, std::map<string, vector<Inventory*> > &resto_inventory_suggestions) {
+void outputInventorySuggestion (std::map<string, vector<Inventory*> > &resto_inventory_suggestions) {
   ofstream myfile;
-  myfile.open ("inventory_suggestions_pre_opening.txt");
-  cout << "Writing inventory suggestions\n";
+  myfile.open ("inventory_orders.txt", ios::app);
+  cout << "Writing inventory suggestions \n";
   for (std::map<string, vector<Inventory*> >::iterator it = resto_inventory_suggestions.begin(); it!= resto_inventory_suggestions.end(); ++it) {
     std::vector<Inventory*> vec_inv = it->second;
 
@@ -443,8 +354,8 @@ void outputInventorySuggestion (string date, std::map<string, vector<Inventory*>
 
 void outputInventoryState (string date, std::map<string, Restaurant*> &resto_map) {
   ofstream myfile;
-  myfile.open ("state_inventory_pre_opening.txt");
-  cout << "Writing state inventory\n";
+  myfile.open ("inventory_state__pre_opening.txt", ios::app);
+  cout << "Writing state inventory for " << date << endl;
   for (std::map<string, Restaurant*>::iterator resto_it = resto_map.begin(); resto_it!= resto_map.end(); ++resto_it) {
       Restaurant * resto = resto_it->second;
       for (std::map<string, int>::iterator it = resto->ing_net_quantity_map.begin(); it != resto->ing_net_quantity_map.end(); ++it) {
@@ -457,15 +368,16 @@ void outputInventoryState (string date, std::map<string, Restaurant*> &resto_map
 
 void outputInventoryStateEOD (string date, std::map<string, Restaurant*> &resto_map) {
   ofstream myfile;
-  myfile.open ("state_inventory_EOD.txt");
-  cout << "Writing state inventory EOD\n";
+  myfile.open ("inventory_state_with_expiry.txt");
+  cout << "Writing state inventory EOD for " << date << endl;
   for (std::map<string, Restaurant*>::iterator resto_it = resto_map.begin(); resto_it!= resto_map.end(); ++resto_it) {
       Restaurant * resto = resto_it->second;
       for (std::map<string, vector<Inventory*> >::iterator it = resto->ing_inv_map.begin(); it != resto->ing_inv_map.end(); ++it) {
         vector<Inventory*> vec_inv = it->second;
         for (int i = 0; i < vec_inv.size(); i++) {
           if (vec_inv[i] != NULL) {
-            myfile << date << "," << resto->name << "," << vec_inv[i]->ingredient_name << "," << vec_inv[i]->quantity << "," << vec_inv[i]->bought_since << endl;
+            // add +1 to bought_since at EOD
+            myfile << date << "," << resto->name << "," << vec_inv[i]->ingredient_name << "," << vec_inv[i]->quantity << "," << vec_inv[i]->bought_since+1 << endl;
           }
         }
       }
@@ -473,30 +385,43 @@ void outputInventoryStateEOD (string date, std::map<string, Restaurant*> &resto_
   myfile.close();
 }
 
-int main() {
 
-  map<string, Ingredient*> ingredient_map;
-  map<string, Dish*> dish_map;
-  map<string, Restaurant*> resto_map;
-  std::map<string, vector<Inventory*> > resto_inventory_suggestions;
-  vector<Restaurant*> restos;
+void RestoSystem::runSys(std::map<string, Restaurant*> &resto_map, std::map<string, Dish*> &dish_map, std::map<string, Ingredient*> &ingredient_map) {
+  cout << "Running System \n";
   std::vector<Order*> orders;
-
-  readIngredients ( ingredient_map );
-  readDishes ( dish_map, ingredient_map );
-  readRestaurantMenus ( dish_map, restos, resto_map );
-  readInventoryState ( ingredient_map, resto_map );
-
+  std::map<string, vector<Inventory*> > resto_inventory_suggestions;
   readOrders ( orders );
-  // TODO - sort orders on basis of timestamp
 
-  outputInventoryState ("date", resto_map);
+  int start_index = 0, end_index;
+  while (start_index < orders.size()) {
 
-  getInventorySuggestion ( "date", ingredient_map, resto_map, orders, resto_inventory_suggestions );
-  outputInventorySuggestion ("date", resto_inventory_suggestions);
+    // -------------- reading previous day orders ---------------------
+    string yesterday = orders[start_index]->date;
+    end_index = start_index+1;
+    while (end_index < orders.size() && orders[end_index]->date == yesterday) {
+      end_index++;
+    }
+    // ----------------------------------------------------------------
 
-  serveOrders ( dish_map, orders, resto_map, 0, orders.size());
+    string today = get_tomorrow(yesterday);
 
-  outputInventoryStateEOD ("date", resto_map);
-  return 0;
+    cout << "\n\n\nToday - " << today << endl;
+
+    readInventoryState ( yesterday, ingredient_map, resto_map );
+
+    outputInventoryState (today, resto_map);
+
+    getInventorySuggestion ( today, ingredient_map, resto_map, orders, resto_inventory_suggestions );
+    outputInventorySuggestion (resto_inventory_suggestions);
+
+    reStockInventory (resto_map, resto_inventory_suggestions);
+
+    serveOrders(today, dish_map, orders, resto_map, end_index);
+
+    outputInventoryStateEOD (today, resto_map);
+
+    resto_inventory_suggestions.clear();
+
+    start_index = end_index;
+  }
 }
